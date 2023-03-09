@@ -292,6 +292,9 @@ HighsStatus Highs::passModel(HighsModel model) {
   // This is the "master" Highs::passModel, in that all the others
   // eventually call it
   this->logHeader();
+  // Possibly analyse the LP data
+  if (kHighsAnalysisLevelModelData & options_.highs_analysis_level)
+    analyseLp(options_.log_options, model.lp_);
   HighsStatus return_status = HighsStatus::kOk;
   // Clear the incumbent model and any associated data
   clearModel();
@@ -329,9 +332,8 @@ HighsStatus Highs::passModel(HighsModel model) {
   // Ensure that the LP is column-wise
   lp.ensureColwise();
   // Check validity of the LP, normalising its values
-  return_status =
-      interpretCallStatus(options_.log_options, assessLp(lp, options_, true),
-                          return_status, "assessLp");
+  return_status = interpretCallStatus(
+      options_.log_options, assessLp(lp, options_), return_status, "assessLp");
   if (return_status == HighsStatus::kError) return return_status;
   // Check validity of any Hessian, normalising its entries
   return_status = interpretCallStatus(options_.log_options,
@@ -888,7 +890,7 @@ HighsStatus Highs::run() {
   if (options_.highs_debug_level > min_highs_debug_level) {
     // Shouldn't have to check validity of the LP since this is done when it is
     // loaded or modified
-    call_status = assessLp(model_.lp_, options_, true);
+    call_status = assessLp(model_.lp_, options_);
     // If any errors have been found or normalisation carried out,
     // call_status will be kError or kWarning, so only valid return is OK.
     assert(call_status == HighsStatus::kOk);
@@ -1139,15 +1141,25 @@ HighsStatus Highs::run() {
       case HighsPresolveStatus::kReduced: {
         HighsLp& reduced_lp = presolve_.getReducedProblem();
         reduced_lp.setMatrixDimensions();
-        // Validate the reduced LP; note that assessLp() may return a warning
-        // if matrix values dropped below the small_matrix_value threshold
-        // during presolving
-        return_status = assessLp(reduced_lp, options_, false);
         if (kAllowDeveloperAssert) {
-          assert(return_status == HighsStatus::kOk);
+          // Validate the reduced LP
+          //
+          // Although preseolve can yield small values in the matrix,
+          // they are only stripped out (by assessLp) in debug. This
+          // suggests that they are no real danger to the simplex
+          // solver. The only danger is pivoting on them, but that
+          // implies that values of roughly that size have been chosen
+          // in the ratio test. Even with the filter, values of 1e-9
+          // could be in the matrix, and these would be bad
+          // pivots. Hence, since the small values may play a
+          // meaningful role in postsolve, then it's better to keep
+          // them.
+          //
+          // ToDo. Analyse the extent of small value creation. See #1187
+          assert(assessLp(reduced_lp, options_) == HighsStatus::kOk);
         } else {
-          assert(return_status != HighsStatus::kError);
-          return_status = HighsStatus::kOk;
+          reduced_lp.a_matrix_.assessSmallValues(options_.log_options,
+                                                 options_.small_matrix_value);
         }
         call_status = cleanBounds(options_, reduced_lp);
         // Ignore any warning from clean bounds since the original LP
@@ -1540,17 +1552,8 @@ HighsStatus Highs::getPrimalRay(bool& has_primal_ray,
   return getPrimalRayInterface(has_primal_ray, primal_ray_value);
 }
 
-HighsStatus Highs::getRanging() {
-  // Create a HighsLpSolverObject of references to data in the Highs
-  // class, and the scaled/unscaled model status
-  HighsLpSolverObject solver_object(model_.lp_, basis_, solution_, info_,
-                                    ekk_instance_, options_, timer_);
-  solver_object.model_status_ = model_status_;
-  return getRangingData(this->ranging_, solver_object);
-}
-
 HighsStatus Highs::getRanging(HighsRanging& ranging) {
-  HighsStatus return_status = getRanging();
+  HighsStatus return_status = getRangingInterface();
   ranging = this->ranging_;
   return return_status;
 }
@@ -2672,8 +2675,9 @@ HighsStatus Highs::writeSolution(const std::string& filename,
       return_status = HighsStatus::kError;
       return returnFromWriteSolution(file, return_status);
     }
-    return_status = interpretCallStatus(
-        options_.log_options, this->getRanging(), return_status, "getRanging");
+    return_status =
+        interpretCallStatus(options_.log_options, this->getRangingInterface(),
+                            return_status, "getRangingInterface");
     if (return_status == HighsStatus::kError)
       returnFromWriteSolution(file, return_status);
     fprintf(file, "\n# Ranging\n");
@@ -2954,8 +2958,6 @@ HighsStatus Highs::callSolveLp(HighsLp& lp, const string message) {
   HighsStatus return_status = HighsStatus::kOk;
   HighsStatus call_status;
 
-  // Create a HighsLpSolverObject of references to data in the Highs
-  // class, and the scaled/unscaled model status
   HighsLpSolverObject solver_object(lp, basis_, solution_, info_, ekk_instance_,
                                     options_, timer_);
 

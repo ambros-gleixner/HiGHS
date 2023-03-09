@@ -674,8 +674,7 @@ void HighsSparseMatrix::deleteRows(
 HighsStatus HighsSparseMatrix::assess(const HighsLogOptions& log_options,
                                       const std::string matrix_name,
                                       const double small_matrix_value,
-                                      const double large_matrix_value,
-                                      const bool cleanup) {
+                                      const double large_matrix_value) {
   assert(this->formatOk());
   // Identify main dimensions
   HighsInt vec_dim;
@@ -690,7 +689,18 @@ HighsStatus HighsSparseMatrix::assess(const HighsLogOptions& log_options,
   const bool partitioned = this->format_ == MatrixFormat::kRowwisePartitioned;
   return assessMatrix(log_options, matrix_name, vec_dim, num_vec, partitioned,
                       this->start_, this->p_end_, this->index_, this->value_,
-                      small_matrix_value, large_matrix_value, cleanup);
+                      small_matrix_value, large_matrix_value);
+}
+
+void HighsSparseMatrix::assessSmallValues(const HighsLogOptions& log_options,
+                                          const double small_matrix_value) {
+  double min_value = kHighsInf;
+  const HighsInt num_values = this->value_.size();
+  for (HighsInt iX = 0; iX < num_values; iX++)
+    min_value = std::min(std::abs(this->value_[iX]), min_value);
+  if (min_value > small_matrix_value) return;
+  analyseVectorValues(&log_options, "Small values in matrix", num_values,
+                      this->value_, false, "");
 }
 
 bool HighsSparseMatrix::hasLargeValue(const double large_matrix_value) {

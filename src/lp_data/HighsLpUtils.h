@@ -38,8 +38,7 @@ HighsStatus readBasisStream(const HighsLogOptions& log_options,
                             HighsBasis& basis, std::ifstream& in_file);
 
 // Methods taking HighsLp as an argument
-HighsStatus assessLp(HighsLp& lp, const HighsOptions& options,
-                     const bool cleanup);
+HighsStatus assessLp(HighsLp& lp, const HighsOptions& options);
 
 bool lpDimensionsOk(std::string message, const HighsLp& lp,
                     const HighsLogOptions& log_options);
@@ -52,7 +51,7 @@ HighsStatus assessBounds(const HighsOptions& options, const char* type,
                          const HighsInt ml_ix_os,
                          const HighsIndexCollection& index_collection,
                          vector<double>& lower, vector<double>& upper,
-                         const double infinite_bound, const bool cleanup);
+                         const double infinite_bound);
 
 HighsStatus cleanBounds(const HighsOptions& options, HighsLp& lp);
 
